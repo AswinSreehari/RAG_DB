@@ -1,0 +1,270 @@
+{
+    "app": {
+        "title": "Welcome to the Web Platform!",
+        "user": {
+            "name": "User",
+            "role": "Admin"
+        }
+    },
+    "sidebar": [
+        {
+            "id": "home",
+            "label": "Home",
+            "icon": "Home",
+            "active": true
+        },
+        {
+            "id": "generator",
+            "label": "Generator",
+            "icon": "Sparkles"
+        },
+        {
+            "id": "chat",
+            "label": "Chat Agent",
+            "icon": "MessageSquare"
+        },
+        {
+            "id": "faq",
+            "label": "FAQ",
+            "icon": "HelpCircle",
+            "bottom": true
+        },
+        {
+            "id": "support",
+            "label": "Support",
+            "icon": "Headphones",
+            "bottom": true
+        }
+    ],
+    "projects": [
+        {
+            "id": 1,
+            "title": "Upgrade the Legacy Systems for XYZ Client",
+            "files": 127,
+            "users": 12,
+            "lastModified": "21 Nov, 2025",
+            "active": true
+        },
+        {
+            "id": 2,
+            "title": "Enhance the Data Analysis Software",
+            "files": 225,
+            "users": 25,
+            "lastModified": "29 Nov, 2025"
+        },
+        {
+            "id": 3,
+            "title": "Quality Assurance and Marketing Platform enhancement",
+            "files": 25,
+            "users": 5,
+            "lastModified": "01 Dec, 2025"
+        },
+        {
+            "id": 4,
+            "title": "Augmented Reality use case for Solar farm",
+            "files": 93,
+            "users": 12,
+            "lastModified": "13 Dec, 2025"
+        },
+        {
+            "id": 5,
+            "title": "Security platform enhancement for PRV",
+            "files": 77,
+            "users": 16,
+            "lastModified": "29 Dec, 2025"
+        }
+    ],
+    "documentGenerator": {
+        "title": "Document Generator",
+        "subtitle": "Please select the document you want to generate",
+        "options": [
+            "BRD",
+            "Test Case",
+            "RTM",
+            "Sprint Stories",
+            "Executive Summary",
+            "Gap Analysis"
+        ]
+    },
+    "chatAssistant": {
+        "title": "Chat Assistant",
+        "subtitle": "Ask questions and get instant insights",
+        "intro": "Hello! I'm your Smart BA Chat assistant. I can help you analyze reports, understand the data and answer questions about all things a Business Analyst needs.\n\nYou can choose from the FAQs below for quick help otherwise you can select go to chat section to interact more!",
+        "faqs": [
+            "How to generate a BRD?",
+            "What are the supported file formats?",
+            "Are there any default templates?",
+            "How is my data stored here?"
+        ]
+    },
+    "stakeholderOwnership": {
+        "title": "Stakeholder Ownership",
+        "totalActions": 24,
+        "data": [
+            {
+                "name": "Open",
+                "value": 4,
+                "color": "#bae6fd"
+            },
+            {
+                "name": "Decisions",
+                "value": 2,
+                "color": "#a855f7"
+            },
+            {
+                "name": "Overdue",
+                "value": 8,
+                "color": "#be123c"
+            },
+            {
+                "name": "Closed",
+                "value": 10,
+                "color": "#64748b"
+            }
+        ]
+    },
+    "projectDetails": {
+        "title": "Project Details",
+        "stats": {
+            "files": 127,
+            "users": 12,
+            "lastModified": "21 Nov, 2025"
+        },
+        "cta": "View More"
+    },
+    "projectDetailsView": {
+        "meetings": [
+            {
+                "date": "12 Aug 2025",
+                "duration": "52 min",
+                "participants": 7,
+                "transcriptStatus": "Processed",
+                "actions": 6,
+                "decisions": 2
+            },
+            {
+                "date": "25 Nov 2025",
+                "duration": "65 min",
+                "participants": 12,
+                "transcriptStatus": "Processed",
+                "actions": 10,
+                "decisions": 5
+            }
+        ],
+        "decisions": [
+            {
+                "title": "Use template for BRD",
+                "owner": "Manager",
+                "date": "29 Nov",
+                "affects": "BRD Template, Default format"
+            },
+            {
+                "title": "Use microservices architecture",
+                "owner": "CTO",
+                "date": "11 Oct",
+                "affects": "SRS, API Docs"
+            }
+        ],
+        "stakeholders": [
+            {
+                "name": "ABC | Client Sponsor",
+                "status": "Online",
+                "online": true
+            },
+            {
+                "name": "BXC | Product Owner",
+                "status": "Offline",
+                "online": false
+            },
+            {
+                "name": "SPB | Tech Lead",
+                "status": "Online",
+                "online": true
+            },
+            {
+                "name": "DLM | Scrum Master",
+                "status": "Offline",
+                "online": false
+            }
+        ],
+        "reviewComments": [
+            {
+                "text": "\"Validation rules missing for amount field\"",
+                "context": "ABC, BRD Section 4.2",
+                "severity": "Blocking",
+                "status": "Open",
+                "severityColor": "#be123c"
+            },
+            {
+                "text": "\"Performance Testcase seems optimistic\"",
+                "context": "SPB, Testcase 1.0",
+                "severity": "Major",
+                "status": "Resolved",
+                "severityColor": "#ca8a04"
+            }
+        ],
+        "escalations": [
+            {
+                "title": "BRD approval delayed by 5 days",
+                "escalatedBy": "BA Lead",
+                "to": "Client Sponsor",
+                "reason": "Delivery risk",
+                "urgency": "High",
+                "urgencyColor": "#ef4444"
+            },
+            {
+                "title": "Security compliance conflict",
+                "escalatedBy": "CTO",
+                "to": "Team Lead",
+                "reason": "Emergency Delivery",
+                "urgency": "Critical",
+                "urgencyColor": "#b91c1c"
+            }
+        ],
+        "aiSuggestions": {
+            "score": 82,
+            "status": "GOOD",
+            "metrics": [
+                {
+                    "label": "Completeness",
+                    "value": 88
+                },
+                {
+                    "label": "Clarity",
+                    "value": 76
+                },
+                {
+                    "label": "Testability",
+                    "value": 81
+                },
+                {
+                    "label": "Consistency",
+                    "value": 73
+                },
+                {
+                    "label": "NFR Coverage",
+                    "value": 59
+                }
+            ],
+            "missingNfrs": [
+                {
+                    "title": "Security NFR missing in SRS",
+                    "impact": "High",
+                    "impactColor": "#ef4444",
+                    "suggested": "\"Enable RBAC + encryption\""
+                },
+                {
+                    "title": "Scalability NFR missing in BRD",
+                    "impact": "Medium",
+                    "impactColor": "#eab308",
+                    "suggested": "\"Support 10K users\""
+                }
+            ],
+            "recommendations": [
+                "Add performance benchmarks for report generation.",
+                "Define retry rules for failed uploads.",
+                "Add audit trail NFR for compliance."
+            ]
+        }
+    }
+}
