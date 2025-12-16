@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import Sidebar from './Sidebar';
 import Header from './Header';
 
-const Layout = ({ children }) => {
+const Layout = ({ children, onNavigate, activeView }) => {
     const [sidebarOpen, setSidebarOpen] = useState(false);
 
     return (
@@ -14,6 +14,8 @@ const Layout = ({ children }) => {
                     <Sidebar
                         isOpen={sidebarOpen}
                         onClose={() => setSidebarOpen(false)}
+                        onNavigate={onNavigate}
+                        activeView={activeView}
                     />
                 </div>
             </div>

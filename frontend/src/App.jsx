@@ -6,16 +6,35 @@ import ChatAssistantWidget from './components/dashboard/ChatAssistantWidget';
 import StakeholderOwnershipWidget from './components/dashboard/StakeholderOwnershipWidget';
 import ProjectDetailsWidget from './components/dashboard/ProjectDetailsWidget';
 import ProjectView from './components/project/ProjectView';
+import ChatAgentView from './components/chat/ChatAgentView';
 
 function App() {
   const [selectedProject, setSelectedProject] = useState(null);
+  const [activeView, setActiveView] = useState('dashboard'); // 'dashboard', 'chat-agent', or 'project'
+
+  const handleNavigation = (label) => {
+    if (label === 'Home') {
+      setActiveView('dashboard');
+      setSelectedProject(null);
+    } else if (label === 'Chat Agent') {
+      setActiveView('chat-agent');
+      setSelectedProject(null);
+    }
+  };
+
+  const handleProjectClick = (project) => {
+    setSelectedProject(project);
+    setActiveView('project');
+  };
 
   return (
-    <Layout>
-      {selectedProject ? (
+    <Layout onNavigate={handleNavigation} activeView={activeView}>
+      {activeView === 'chat-agent' ? (
+        <ChatAgentView />
+      ) : activeView === 'project' ? (
         <ProjectView
           project={selectedProject}
-          onBack={() => setSelectedProject(null)}
+          onBack={() => { setSelectedProject(null); setActiveView('dashboard'); }}
         />
       ) : (
         <div className="flex flex-col gap-6 h-full pb-2">
@@ -23,7 +42,7 @@ function App() {
           <div className="flex-[3] flex flex-col lg:flex-row gap-6 min-h-0 overflow-hidden">
             {/* Projects: Wider */}
             <div className="flex-[2] h-full overflow-hidden">
-              <ProjectsWidget onProjectClick={(project) => setSelectedProject(project)} />
+              <ProjectsWidget onProjectClick={handleProjectClick} />
             </div>
 
             {/* Doc Generator: Narrower */}

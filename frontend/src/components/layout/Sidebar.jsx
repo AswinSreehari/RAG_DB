@@ -10,8 +10,14 @@ const iconMap = {
     Support: Headphones
 };
 
-const Sidebar = ({ isOpen, onClose }) => {
+const Sidebar = ({ isOpen, onClose, onNavigate, activeView }) => {
     const { sidebar } = data;
+
+    const isItemActive = (label) => {
+        if (label === 'Home') return activeView === 'dashboard';
+        if (label === 'Chat Agent') return activeView === 'chat-agent';
+        return false;
+    };
 
     return (
         <>
@@ -38,15 +44,17 @@ const Sidebar = ({ isOpen, onClose }) => {
 
                     {sidebar.filter(item => !item.bottom).map((item) => {
                         const Icon = iconMap[item.label] || Home;
+                        const isActive = isItemActive(item.label);
                         return (
                             <div
                                 key={item.id}
+                                onClick={() => onNavigate && onNavigate(item.label)}
                                 className={`flex items-center gap-3 px-6 py-3 cursor-pointer transition-colors relative
-                  ${item.active
+                  ${isActive
                                         ? 'bg-gradient-to-r from-teal-500/20 to-teal-500/0 text-teal-400'
                                         : 'text-slate-400 hover:text-white hover:bg-slate-700/50'}`}
                             >
-                                {item.active && <div className="absolute left-0 top-0 bottom-0 w-1 bg-teal-500 rounded-r-lg" />}
+                                {isActive && <div className="absolute left-0 top-0 bottom-0 w-1 bg-teal-500 rounded-r-lg" />}
                                 <Icon size={20} />
                                 <span className="font-medium">{item.label}</span>
                             </div>
