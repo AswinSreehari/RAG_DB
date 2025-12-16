@@ -7,6 +7,7 @@ import StakeholderOwnershipWidget from './components/dashboard/StakeholderOwners
 import ProjectDetailsWidget from './components/dashboard/ProjectDetailsWidget';
 import ProjectView from './components/project/ProjectView';
 import ChatAgentView from './components/chat/ChatAgentView';
+import GeneratorView from './components/generator/GeneratorView';
 
 function App() {
   const [selectedProject, setSelectedProject] = useState(null);
@@ -18,6 +19,9 @@ function App() {
       setSelectedProject(null);
     } else if (label === 'Chat Agent') {
       setActiveView('chat-agent');
+      setSelectedProject(null);
+    } else if (label === 'Generator') {
+      setActiveView('generator');
       setSelectedProject(null);
     }
   };
@@ -31,6 +35,8 @@ function App() {
     <Layout onNavigate={handleNavigation} activeView={activeView}>
       {activeView === 'chat-agent' ? (
         <ChatAgentView />
+      ) : activeView === 'generator' ? (
+        <GeneratorView />
       ) : activeView === 'project' ? (
         <ProjectView
           project={selectedProject}

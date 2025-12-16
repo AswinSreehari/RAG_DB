@@ -6,7 +6,7 @@ const ChatAgentView = () => {
         {
             id: 1,
             type: 'bot',
-            text: 'Hello! 👋 I\'m your AI assistant. How can I help you today?',
+            text: 'Hello! I\'m your AI assistant. How can I help you today?',
             timestamp: new Date()
         }
     ]);
@@ -42,7 +42,7 @@ const ChatAgentView = () => {
             const botReply = {
                 id: Date.now() + 1,
                 type: 'bot',
-                text: '🔧 This feature is currently under development. Stay tuned for updates!',
+                text: 'This feature is currently under development. Stay tuned for updates!',
                 timestamp: new Date()
             };
             setMessages(prev => [...prev, botReply]);
@@ -80,8 +80,8 @@ const ChatAgentView = () => {
                         <div className={`max-w-[70%] ${message.type === 'user' ? 'order-1' : ''}`}>
                             <div
                                 className={`rounded-2xl px-4 py-3 ${message.type === 'user'
-                                        ? 'bg-teal-500 text-white rounded-br-sm'
-                                        : 'bg-white text-slate-800 rounded-bl-sm shadow-sm'
+                                    ? 'bg-teal-500 text-white rounded-br-sm'
+                                    : 'bg-white text-slate-800 rounded-bl-sm shadow-sm'
                                     }`}
                             >
                                 <p className="text-sm leading-relaxed">{message.text}</p>

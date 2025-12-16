@@ -16,6 +16,7 @@ const Sidebar = ({ isOpen, onClose, onNavigate, activeView }) => {
     const isItemActive = (label) => {
         if (label === 'Home') return activeView === 'dashboard';
         if (label === 'Chat Agent') return activeView === 'chat-agent';
+        if (label === 'Generator') return activeView === 'generator';
         return false;
     };
 
