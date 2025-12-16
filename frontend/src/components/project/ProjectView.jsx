@@ -18,7 +18,7 @@ const ProjectView = ({ project, onBack }) => {
                 </button>
                 <div className="flex items-center">
                     <span className="font-bold text-slate-600 mr-2">Project Name :</span>
-                    <span className="font-bold text-slate-800 text-lg">{project.title}</span>
+                    <span className="font-bold text-slate-800 text-lg">{project.name}</span>
                 </div>
             </div>
 
