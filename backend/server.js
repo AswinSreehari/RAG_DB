@@ -1,21 +1,42 @@
-require('dotenv').config();
+// backend/server.js
 const express = require('express');
 const cors = require('cors');
+require('dotenv').config();
 const projectRoutes = require('./routes/projectRoutes');
 
+
+const documentsRouter = require('./routes/documents');
+
 const app = express();
-const PORT = process.env.PORT || 5000;
 
-app.use(cors());
+// CORS (must match exact origins, no trailing slash)
+app.use(
+  cors({
+    origin: [
+      'https://file-upload-brown.vercel.app',  
+      'https://doc-extraction-ten.vercel.app',  
+      'http://localhost:5173',                
+    ],
+    methods: 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+  })
+);
+
+// Body parsers
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Routes
-app.use('/api/projects', projectRoutes);
-
+// Health check
 app.get('/', (req, res) => {
-  res.send('RAG UI Backend is running');
+  res.json({ message: 'Document backend is running ✅' });
 });
 
+// Documents routes
+app.use('/documents', documentsRouter);
+app.use('/api/projects', projectRoutes);
+
+
+// Listen
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Backend server listening on port ${PORT}`);
 });

@@ -1,0 +1,6 @@
+pytesseract
+python-pptx
+Pillow
+python-dotenv
+pymupdf
+markitdown

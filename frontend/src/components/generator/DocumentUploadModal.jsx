@@ -1,9 +1,12 @@
 import React from 'react';
-import { X, Upload, FileText } from 'lucide-react';
+import { X, Upload, FileText, Loader2 } from 'lucide-react';
+import { uploadDocuments } from '../../services/documentService';
 
 const DocumentUploadModal = ({ isOpen, onClose, onUpload }) => {
     const [selectedFiles, setSelectedFiles] = React.useState([]);
     const [dragActive, setDragActive] = React.useState(false);
+    const [uploading, setUploading] = React.useState(false);
+    const [uploadError, setUploadError] = React.useState(null);
 
     const documentRepository = [
         { id: 1, name: 'Upgrade the Legacy Systems for XYZ', type: 'BRD' },
@@ -37,11 +40,9 @@ const DocumentUploadModal = ({ isOpen, onClose, onUpload }) => {
     };
 
     const handleFiles = (files) => {
-        const fileArray = Array.from(files).map((file, index) => ({
-            id: Date.now() + index,
-            name: file.name,
-            size: file.size
-        }));
+        // CRITICAL: Keep the actual File objects, don't extract properties!
+        // File objects are needed for FormData upload
+        const fileArray = Array.from(files);
         setSelectedFiles(prev => [...prev, ...fileArray]);
     };
 
@@ -51,23 +52,56 @@ const DocumentUploadModal = ({ isOpen, onClose, onUpload }) => {
         }
     };
 
-    const removeFile = (fileId) => {
-        setSelectedFiles(prev => prev.filter(f => f.id !== fileId));
+    const removeFile = (fileName) => {
+        setSelectedFiles(prev => prev.filter(f => f.name !== fileName));
     };
 
     const toggleDocument = (doc) => {
+        // Repository documents are for reference only, not actual file uploads
+        // Users should drag-drop or browse for actual files
         const exists = selectedFiles.find(f => f.id === doc.id);
         if (exists) {
             setSelectedFiles(prev => prev.filter(f => f.id !== doc.id));
         } else {
-            setSelectedFiles(prev => [...prev, { ...doc, fromRepo: true }]);
+            // Mark as repository reference (won't be uploaded)
+            setSelectedFiles(prev => [...prev, { ...doc, fromRepo: true, isReference: true }]);
         }
     };
 
-    const handleUploadClick = () => {
-        onUpload(selectedFiles);
-        setSelectedFiles([]);
-        onClose();
+    const handleUploadClick = async () => {
+        if (selectedFiles.length === 0) {
+            return;
+        }
+
+        setUploading(true);
+        setUploadError(null);
+
+        try {
+            // Filter to only actual File objects
+            const realFiles = selectedFiles.filter(f => f instanceof File);
+
+            if (realFiles.length === 0) {
+                setUploadError('Please select files to upload from your computer');
+                setUploading(false);
+                return;
+            }
+
+            console.log('Uploading files:', realFiles.map(f => f.name));
+            const result = await uploadDocuments(realFiles);
+
+            // Pass results back to parent component
+            onUpload(result);
+
+            // Clear and close
+            setSelectedFiles([]);
+            setUploadError(null);
+            onClose();
+        } catch (error) {
+            console.error('Upload error:', error);
+            setUploadError(error.message || 'Failed to upload files');
+        } finally {
+            setUploading(false);
+        }
     };
 
     if (!isOpen) return null;
@@ -117,12 +151,12 @@ const DocumentUploadModal = ({ isOpen, onClose, onUpload }) => {
                             {/* Selected Files */}
                             {selectedFiles.length > 0 && (
                                 <div className="mt-4 space-y-2">
-                                    {selectedFiles.map((file) => (
-                                        <div key={file.id} className="flex items-center gap-2 p-2 bg-white border border-slate-200 rounded-lg">
+                                    {selectedFiles.map((file, index) => (
+                                        <div key={file.name + index} className="flex items-center gap-2 p-2 bg-white border border-slate-200 rounded-lg">
                                             <FileText size={16} className="text-teal-500" />
                                             <span className="text-sm text-slate-700 flex-1 truncate">{file.name}</span>
                                             <button
-                                                onClick={() => removeFile(file.id)}
+                                                onClick={() => removeFile(file.name)}
                                                 className="p-1 hover:bg-slate-100 rounded"
                                             >
                                                 <X size={14} className="text-slate-400" />
@@ -144,8 +178,8 @@ const DocumentUploadModal = ({ isOpen, onClose, onUpload }) => {
                                             key={doc.id}
                                             onClick={() => toggleDocument(doc)}
                                             className={`w-full text-left p-3 rounded-lg transition-all border ${isSelected
-                                                    ? 'bg-teal-50 border-teal-300 text-teal-700'
-                                                    : 'bg-white border-slate-200 hover:border-teal-300 text-slate-700'
+                                                ? 'bg-teal-50 border-teal-300 text-teal-700'
+                                                : 'bg-white border-slate-200 hover:border-teal-300 text-slate-700'
                                                 }`}
                                         >
                                             <div className="flex items-start gap-2">
@@ -163,19 +197,35 @@ const DocumentUploadModal = ({ isOpen, onClose, onUpload }) => {
                 </div>
 
                 {/* Footer */}
-                <div className="p-6 border-t border-slate-200 flex gap-3 justify-end">
-                    <button
-                        onClick={onClose}
-                        className="px-6 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors font-medium"
-                    >
-                        Cancel
-                    </button>
-                    <button
-                        onClick={handleUploadClick}
-                        className="px-6 py-2 bg-teal-500 hover:bg-teal-600 text-white rounded-lg transition-colors font-medium"
-                    >
-                        Upload Files
-                    </button>
+                <div className="p-6 border-t border-slate-200">
+                    {uploadError && (
+                        <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                            {uploadError}
+                        </div>
+                    )}
+                    <div className="flex gap-3 justify-end">
+                        <button
+                            onClick={onClose}
+                            disabled={uploading}
+                            className="px-6 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors font-medium disabled:opacity-50"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            onClick={handleUploadClick}
+                            disabled={uploading || selectedFiles.length === 0}
+                            className="px-6 py-2 bg-teal-500 hover:bg-teal-600 text-white rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                        >
+                            {uploading ? (
+                                <>
+                                    <Loader2 size={16} className="animate-spin" />
+                                    Uploading...
+                                </>
+                            ) : (
+                                'Upload Files'
+                            )}
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
