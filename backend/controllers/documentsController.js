@@ -23,8 +23,7 @@ const textExtractService = require('../services/textExtractService');
 const { convertPdfToImages } = require('../services/pdfToImagesService');
 const { extractTextFromImage } = require("../services/localOcrService");
 const os = require('os');
-const { v4: uuidv4 } = require('uuid');
-
+ 
 // PDF creation utilities
 const {
   createPdfFromText,
