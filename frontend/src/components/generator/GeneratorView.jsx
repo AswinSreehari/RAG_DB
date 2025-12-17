@@ -209,7 +209,7 @@ const GeneratorView = () => {
 
 
     return (
-        <div className="flex flex-col h-full gap-4">
+        <div className="flex flex-col h-full gap-2">
 
             {/* TOP BAR */}
             <div className="flex items-center gap-3">
@@ -228,7 +228,7 @@ const GeneratorView = () => {
 
                 <div className="bg-white border rounded-lg pl-4 ml-auto flex items-center gap-2">
                     <span className="text-sm text-slate-600">Project Name:</span>
-                    <div className="bg-white border rounded-lg px-3 py-1.5 text-sm">
+                    <div className="px-3 py-1.5 text-sm">
                         {projectName}
                     </div>
                 </div>
@@ -296,6 +296,17 @@ const GeneratorView = () => {
                                             </p>
                                         </div>
 
+                                        {/* JSON DOWNLOAD (CSV / EXCEL ONLY) */}
+                                        {isCsvOrExcel(doc.originalFileName) && (
+                                            <button
+                                                onClick={(e) => handleJsonDownload(e, doc)}
+                                                title="Download JSON"
+                                                className="p-1.5 rounded-lg hover:bg-slate-200"
+                                            >
+                                                <FileJson size={16} />
+                                            </button>
+                                        )}
+
                                         {/* PDF DOWNLOAD */}
                                         {doc.pdfPath && (
                                             <button
@@ -307,16 +318,6 @@ const GeneratorView = () => {
                                             </button>
                                         )}
 
-                                        {/* JSON DOWNLOAD (CSV / EXCEL ONLY) */}
-                                        {isCsvOrExcel(doc.originalFileName) && (
-                                            <button
-                                                onClick={(e) => handleJsonDownload(e, doc)}
-                                                title="Download JSON"
-                                                className="p-1.5 rounded-lg hover:bg-slate-200"
-                                            >
-                                                <FileJson size={16} />
-                                            </button>
-                                        )}
 
                                         {/* DELETE */}
                                         <button

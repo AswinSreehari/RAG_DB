@@ -22,7 +22,7 @@ const Layout = ({ children, onNavigate, activeView }) => {
 
             <div className="flex-1 flex flex-col md:h-full w-full md:overflow-hidden relative">
                 <Header onMenuClick={() => setSidebarOpen(true)} />
-                <main className="flex-1 md:overflow-y-auto overflow-x-hidden p-4 md:p-6 custom-scrollbar">
+                <main className="flex-1 md:overflow-y-auto overflow-x-hidden  p-2 md:pt-2 md:pb-4 custom-scrollbar">
                     {children}
                 </main>
             </div>

@@ -6,7 +6,7 @@ const Header = ({ onMenuClick }) => {
     const { app } = data;
 
     return (
-        <header className="flex justify-between items-center px-4 md:px-8 py-4 bg-[#e6f2f2] shrink-0">
+        <header className="flex justify-between items-center px-4 md:px-8 py-1 bg-[#e6f2f2] shrink-0">
             <div className="flex items-center gap-4">
                 <button
                     className="p-2 hover:bg-slate-200 rounded-full transition-colors md:hidden text-slate-700"
