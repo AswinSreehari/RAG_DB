@@ -4,7 +4,7 @@ import {
     Upload,
     FileText,
     Download,
-    MessageSquare,
+    FileJson,
     Loader2,
     RefreshCw,
     Trash2
@@ -20,8 +20,10 @@ const GeneratorView = () => {
     const [selectedBRD, setSelectedBRD] = useState('BRD');
     const [projectName] = useState('Enhance the Data Analysis Software ™');
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
+    const [loadingPdf, setLoadingPdf] = useState(false);
 
-    const [uploadedFiles, setUploadedFiles] = useState([]);
+
     const [generatedDocs, setGeneratedDocs] = useState([]);
     const [selectedDocId, setSelectedDocId] = useState(null);
 
@@ -32,6 +34,9 @@ const GeneratorView = () => {
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [docToDelete, setDocToDelete] = useState(null);
 
+    const backendUrl =
+        import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+
     useEffect(() => {
         loadDocuments();
     }, []);
@@ -39,7 +44,6 @@ const GeneratorView = () => {
     /* =========================
        LOAD DOCUMENTS
     ========================= */
-
     const loadDocuments = async () => {
         setLoading(true);
         setError(null);
@@ -48,9 +52,7 @@ const GeneratorView = () => {
             setGeneratedDocs(result.items || []);
 
             if (result.items?.length) {
-                setSelectedDocId(prev =>
-                    prev ?? result.items[0].id
-                );
+                setSelectedDocId(prev => prev ?? result.items[0].id);
             } else {
                 setSelectedDocId(null);
             }
@@ -65,21 +67,8 @@ const GeneratorView = () => {
     /* =========================
        UPLOAD HANDLER
     ========================= */
-
-    const handleUpload = async (result) => {
+    const handleUpload = async () => {
         await loadDocuments();
-
-        if (result?.results) {
-            const successful = result.results
-                .filter(r => r.success)
-                .map(r => r.document);
-
-            setUploadedFiles(prev => [...prev, ...successful]);
-
-            if (successful.length > 0) {
-                setSelectedDocId(successful[0].id);
-            }
-        }
     };
 
     const handleDocumentClick = (docId) => {
@@ -87,9 +76,50 @@ const GeneratorView = () => {
     };
 
     /* =========================
-       DELETE HANDLERS (UPDATED)
+       FILE TYPE HELPERS
     ========================= */
+    const isCsvOrExcel = (fileName = '') => {
+        const lower = fileName.toLowerCase();
+        return (
+            lower.endsWith('.csv') ||
+            lower.endsWith('.xls') ||
+            lower.endsWith('.xlsx')
+        );
+    };
 
+    /* =========================
+       DOWNLOAD HANDLERS
+    ========================= */
+    const triggerDownload = (url, filename) => {
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    const handlePdfDownload = (e, doc) => {
+        e.stopPropagation();
+        triggerDownload(
+            `${backendUrl}/documents/${doc.id}/pdf`,
+            doc.originalFileName.replace(/\.[^/.]+$/, '.pdf')
+        );
+    };
+
+
+    const handleJsonDownload = (e, doc) => {
+        e.stopPropagation();
+        triggerDownload(
+            `${backendUrl}/documents/${doc.id}/json`,
+            doc.originalFileName.replace(/\.[^/.]+$/, '.json')
+        );
+    };
+
+
+    /* =========================
+       DELETE HANDLERS
+    ========================= */
     const openDeleteModal = (doc) => {
         setDocToDelete(doc);
         setIsDeleteModalOpen(true);
@@ -104,8 +134,6 @@ const GeneratorView = () => {
         if (!docToDelete) return;
 
         try {
-            const backendUrl =
-                import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
             const apiToken = import.meta.env.VITE_API_TOKEN;
 
             const response = await fetch(
@@ -119,12 +147,10 @@ const GeneratorView = () => {
             );
 
             if (!response.ok) {
-                throw new Error('Delete request failed');
+                throw new Error('Delete failed');
             }
 
-            // 🔑 Re-fetch from backend (source of truth)
             await loadDocuments();
-
             closeDeleteModal();
         } catch (err) {
             console.error('Delete failed:', err);
@@ -135,11 +161,52 @@ const GeneratorView = () => {
     /* =========================
        DERIVED STATE
     ========================= */
-
     const selectedDoc = generatedDocs.find(d => d.id === selectedDocId);
-    const pdfUrl = selectedDocId
-        ? getDocumentPdfUrl(selectedDocId)
-        : null;
+    // const pdfUrl = selectedDocId ? getDocumentPdfUrl(selectedDocId) : null;
+
+    useEffect(() => {
+        if (!selectedDocId) {
+            setPdfBlobUrl(null);
+            return;
+        }
+
+        let cancelled = false;
+        let objectUrl = null;
+
+        const fetchPdfPreview = async () => {
+            setLoadingPdf(true);
+            setPdfBlobUrl(null);
+
+            try {
+                const res = await fetch(
+                    `${backendUrl}/documents/${selectedDocId}/pdf`
+                );
+
+                if (!res.ok) return;
+
+                const blob = await res.blob();
+                objectUrl = URL.createObjectURL(blob);
+
+                if (!cancelled) {
+                    setPdfBlobUrl(objectUrl);
+                } else {
+                    URL.revokeObjectURL(objectUrl);
+                }
+            } catch (err) {
+                console.error('Preview fetch failed', err);
+            } finally {
+                if (!cancelled) setLoadingPdf(false);
+            }
+        };
+
+        fetchPdfPreview();
+
+        return () => {
+            cancelled = true;
+            if (objectUrl) URL.revokeObjectURL(objectUrl);
+        };
+    }, [selectedDocId, backendUrl]);
+
 
     return (
         <div className="flex flex-col h-full gap-4">
@@ -159,7 +226,7 @@ const GeneratorView = () => {
                     <ChevronDown size={16} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400" />
                 </div>
 
-                <div className="ml-auto flex items-center gap-2">
+                <div className="bg-white border rounded-lg pl-4 ml-auto flex items-center gap-2">
                     <span className="text-sm text-slate-600">Project Name:</span>
                     <div className="bg-white border rounded-lg px-3 py-1.5 text-sm">
                         {projectName}
@@ -170,7 +237,6 @@ const GeneratorView = () => {
                     onClick={loadDocuments}
                     disabled={loading}
                     className="p-1.5 bg-white border rounded-lg"
-                    title="Refresh documents"
                 >
                     <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
                 </button>
@@ -191,10 +257,9 @@ const GeneratorView = () => {
                     {/* SOURCE FILES */}
                     <div className="bg-white rounded-2xl p-4 shadow-sm">
                         <h2 className="font-bold mb-3">Source Files</h2>
-
                         <button
                             onClick={() => setIsModalOpen(true)}
-                            className="bg-teal-500 text-white px-4 py-2 rounded-lg flex gap-2 mb-3"
+                            className="bg-teal-500 text-white px-4 py-2 rounded-lg flex gap-2"
                         >
                             <Upload size={16} />
                             Upload Files
@@ -209,18 +274,18 @@ const GeneratorView = () => {
                             <div className="flex-1 flex items-center justify-center">
                                 <Loader2 className="animate-spin text-teal-500" />
                             </div>
-                        ) : generatedDocs.length > 0 ? (
+                        ) : (
                             <div className="flex-1 overflow-y-auto space-y-2">
                                 {generatedDocs.map(doc => (
                                     <div
                                         key={doc.id}
-                                        className={`p-3 rounded-lg border-2 flex justify-between items-center ${selectedDocId === doc.id
+                                        className={`p-3 rounded-lg border-2 flex items-center gap-2 ${selectedDocId === doc.id
                                             ? 'bg-teal-50 border-teal-300'
-                                            : 'bg-slate-50 border-slate-200 hover:border-teal-200'
+                                            : 'bg-slate-50 border-slate-200'
                                             }`}
                                     >
                                         <div
-                                            className="cursor-pointer flex-1"
+                                            className="flex-1 cursor-pointer"
                                             onClick={() => handleDocumentClick(doc.id)}
                                         >
                                             <p className="font-semibold text-xs truncate">
@@ -231,19 +296,38 @@ const GeneratorView = () => {
                                             </p>
                                         </div>
 
+                                        {/* PDF DOWNLOAD */}
+                                        {doc.pdfPath && (
+                                            <button
+                                                onClick={(e) => handlePdfDownload(e, doc)}
+                                                title="Download PDF"
+                                                className="p-1.5 rounded-lg hover:bg-slate-200"
+                                            >
+                                                <Download size={16} />
+                                            </button>
+                                        )}
+
+                                        {/* JSON DOWNLOAD (CSV / EXCEL ONLY) */}
+                                        {isCsvOrExcel(doc.originalFileName) && (
+                                            <button
+                                                onClick={(e) => handleJsonDownload(e, doc)}
+                                                title="Download JSON"
+                                                className="p-1.5 rounded-lg hover:bg-slate-200"
+                                            >
+                                                <FileJson size={16} />
+                                            </button>
+                                        )}
+
+                                        {/* DELETE */}
                                         <button
                                             onClick={() => openDeleteModal(doc)}
+                                            title="Delete document"
                                             className="p-1.5 rounded-lg hover:bg-red-100"
-                                            title="Delete file"
                                         >
                                             <Trash2 size={16} className="text-red-500" />
                                         </button>
                                     </div>
                                 ))}
-                            </div>
-                        ) : (
-                            <div className="flex-1 flex items-center justify-center text-slate-400">
-                                <p className="text-xs">No documents uploaded yet</p>
                             </div>
                         )}
                     </div>
@@ -254,17 +338,18 @@ const GeneratorView = () => {
                     <h2 className="font-bold mb-3">Preview</h2>
 
                     <div className="flex-1 bg-white rounded-lg overflow-hidden">
-                        {selectedDoc && pdfUrl ? (
+                        {loadingPdf && (
+                            <div className="text-sm text-slate-400">Loading preview…</div>
+                        )}
+
+                        {!loadingPdf && pdfBlobUrl && (
                             <iframe
-                                src={pdfUrl}
+                                src={pdfBlobUrl}
                                 className="w-full h-full border-0"
                                 title="Document Preview"
                             />
-                        ) : (
-                            <div className="h-full flex items-center justify-center text-slate-400">
-                                No document selected
-                            </div>
                         )}
+
                     </div>
                 </div>
             </div>
@@ -273,23 +358,21 @@ const GeneratorView = () => {
             {isDeleteModalOpen && (
                 <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
                     <div className="bg-white rounded-xl p-6 w-[360px]">
-                        <h3 className="font-bold text-slate-800 mb-2">
-                            Delete Document
-                        </h3>
-                        <p className="text-sm text-slate-600 mb-4">
+                        <h3 className="font-bold mb-2">Delete Document</h3>
+                        <p className="text-sm mb-4">
                             Are you sure you want to delete this document?
                         </p>
 
                         <div className="flex justify-end gap-2">
                             <button
                                 onClick={closeDeleteModal}
-                                className="px-4 py-2 rounded-lg border"
+                                className="px-4 py-2 border rounded-lg"
                             >
                                 Cancel
                             </button>
                             <button
                                 onClick={confirmDelete}
-                                className="px-4 py-2 rounded-lg bg-red-500 text-white"
+                                className="px-4 py-2 bg-red-500 text-white rounded-lg"
                             >
                                 Delete
                             </button>

@@ -646,7 +646,12 @@ exports.downloadDocumentPdf = (req, res) => {
 
     // Stream the file with appropriate headers
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${path.basename(doc.pdfPath)}"`);
+    // res.setHeader('Content-Disposition', `inline; filename="${path.basename(doc.pdfPath)}"`);
+    res.setHeader(
+  'Content-Disposition',
+  `attachment; filename="${path.basename(doc.pdfPath)}"`
+);
+
 
     const stream = fs.createReadStream(real);
     stream.on('error', (err) => {
