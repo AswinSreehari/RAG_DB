@@ -26,8 +26,8 @@ function cleanExtractedText(rawText = '') {
   // Remove hyphenated line breaks (OCR issue)
   text = text.replace(/(\w+)-\n(\w+)/g, '$1$2');
 
-  // Remove page numbers & standalone numbers
-  text = text.replace(/^\s*(page\s*\d+|\d+)\s*$/gim, '');
+  // Remove page numbers markers specifically
+  text = text.replace(/^\s*page\s*\d+\s*$/gim, '');
 
   return text.trim();
 }

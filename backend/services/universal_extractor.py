@@ -7,13 +7,12 @@ import io
 import re
 import concurrent.futures
 from markitdown import MarkItDown
-from PIL import Image
+from PIL import Image, ImageOps, ImageEnhance
 import fitz  # PyMuPDF
 
 # Configure logging
 logging.basicConfig(level=logging.ERROR)
 
-# Global reader to be initialized lazily to avoid overhead if not needed
 _easyocr_reader = None
 
 def get_easyocr_reader():
@@ -21,44 +20,61 @@ def get_easyocr_reader():
     if _easyocr_reader is None:
         try:
             import easyocr
-            # We initialize with 'en' - this takes a moment
             _easyocr_reader = easyocr.Reader(['en'], gpu=False)
         except Exception as e:
             logging.error(f"Failed to load EasyOCR: {e}")
     return _easyocr_reader
 
+def enhance_image(img):
+    """
+    Enhance image for OCR: grayscale, contrast, and sharpening.
+    """
+    try:
+        img = ImageOps.grayscale(img)
+        img = ImageEnhance.Contrast(img).enhance(2.0)
+        img = ImageEnhance.Sharpness(img).enhance(2.0)
+        return img
+    except:
+        return img
+
 def perform_ocr_on_image(image_input):
     """
-    Optimized OCR for images: preserves lines and groups paragraphs.
+    Highly aggressive OCR: tries EasyOCR, then Tesseract if needed.
     """
+    text = ""
     reader = get_easyocr_reader()
-    if not reader:
-        # Tesseract fallback
-        try:
-            import pytesseract
-            return pytesseract.image_to_string(image_input, config=r'--oem 3 --psm 6')
-        except:
-            return ""
-
+    
     try:
-        # paragraph=True helps in grouping text into blocks/lines
-        # detail=0 returns just the text
         if isinstance(image_input, Image.Image):
-            img_byte_arr = io.BytesIO()
-            image_input.save(img_byte_arr, format='PNG')
-            data = img_byte_arr.getvalue()
+            img = image_input
         else:
-            data = image_input
-            
-        result = reader.readtext(data, detail=0, paragraph=True)
-        return "\n\n".join(result)
+            img = Image.open(image_input)
+        
+        # Pre-process
+        img = enhance_image(img)
+        
+        # Try EasyOCR first
+        if reader:
+            img_byte_arr = io.BytesIO()
+            img.save(img_byte_arr, format='PNG')
+            text = "\n\n".join(reader.readtext(img_byte_arr.getvalue(), detail=0, paragraph=True))
+
+        # Fallback to Tesseract if EasyOCR missed it
+        if len(text.strip()) < 10:
+            import pytesseract
+            # Try different PSM modes for dense text
+            text = pytesseract.image_to_string(img, config=r'--oem 3 --psm 6')
+            if len(text.strip()) < 10:
+                text = pytesseract.image_to_string(img, config=r'--oem 3 --psm 3')
+                
     except Exception as e:
         logging.error(f"OCR failed: {e}")
-        return ""
+        
+    return text
 
 def process_pdf_page(args):
     """
-    Worker function to process a single PDF page.
+    Processes a PDF page with fallback to OCR if native text is sparse.
     """
     page_index, pdf_path = args
     text = ""
@@ -66,34 +82,39 @@ def process_pdf_page(args):
         doc = fitz.open(pdf_path)
         page = doc[page_index]
         
-        # 1. Try to get native text first
+        # 1. Native text extraction
         text = page.get_text("text").strip()
         
-        # 2. If no text, OCR the page
-        if len(text) < 50:
-            # 300 DPI for quality
+        # 2. Aggressive fallback for images/scans
+        # Even if there is some text, it might be just a stamp or footer
+        # If text is low or page has images, try OCR
+        if len(text) < 100 or page.get_images():
             pix = page.get_pixmap(matrix=fitz.Matrix(300/72, 300/72))
             img_data = pix.tobytes("png")
             img = Image.open(io.BytesIO(img_data))
-            text = perform_ocr_on_image(img)
+            ocr_text = perform_ocr_on_image(img)
             
+            # If OCR found more/different text, combine or prefer OCR
+            if len(ocr_text.strip()) > len(text):
+                text = ocr_text
+            elif len(ocr_text.strip()) > 10:
+                text = text + "\n\n" + ocr_text
+                
         doc.close()
     except Exception as e:
-        logging.error(f"Error processing page {page_index}: {e}")
+        logging.error(f"Page {page_index} error: {e}")
         
     return page_index, text
 
 def process_pdf_optimized(pdf_path):
     """
-    Optimized PDF processing: Parallel page extraction.
+    Parallel PDF page processing.
     """
     try:
         doc = fitz.open(pdf_path)
         num_pages = len(doc)
         doc.close()
         
-        # Use ThreadPoolExecutor for parallel page processing
-        # This speeds up multi-page scanned documents significantly
         full_text_parts = [None] * num_pages
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(num_pages, 8)) as executor:
             task_args = [(i, pdf_path) for i in range(num_pages)]
@@ -104,11 +125,11 @@ def process_pdf_optimized(pdf_path):
                 
         return "\n\n".join(full_text_parts)
     except Exception as e:
-        logging.error(f"Optimized PDF processing failed: {e}")
+        logging.error(f"PDF optimized processing failed: {e}")
         return ""
 
 def main():
-    parser = argparse.ArgumentParser(description="Optimal Document Extractor for RAG")
+    parser = argparse.ArgumentParser(description="Mega-Optimal Document Extractor for RAG")
     parser.add_argument("file_path", help="Path to the document")
     args = parser.parse_args()
 
@@ -122,8 +143,7 @@ def main():
     try:
         extracted_text = ""
         
-        # A. Priority 1: MarkItDown for Office formats (Excel, CSV, PPTX, DOCX)
-        # It's unbeatable for preserving structure in these formats.
+        # 1. Handle Native Office Formats
         if ext in ['.xlsx', '.xls', '.csv', '.pptx', '.ppt', '.docx', '.doc']:
             md = MarkItDown()
             try:
@@ -132,14 +152,20 @@ def main():
             except Exception as e:
                 logging.warning(f"MarkItDown failed: {e}")
 
-        # B. Priority 2: Optimized PDF/Image processing
-        if not extracted_text.strip():
-            if ext == '.pdf':
-                extracted_text = process_pdf_optimized(file_path)
-            elif ext in ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.webp']:
+        # 2. Handle PDF and Images (Aggressive mode)
+        if ext == '.pdf':
+            extracted_text = process_pdf_optimized(file_path)
+        elif ext in ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.webp']:
+            extracted_text = perform_ocr_on_image(file_path)
+
+        # 3. Final Search & Destroy for missing text
+        # If we still have almost nothing, force an OCR attempt by treating it as an image if possible
+        if len(extracted_text.strip()) < 20:
+            if ext not in ['.pdf', '.xlsx', '.xls', '.csv']:
+                # Maybe it's a mislabeled image?
                 extracted_text = perform_ocr_on_image(file_path)
-        
-        # C. Final Fallback: Treat as plain text
+
+        # 4. Plain Text Fallback
         if not extracted_text.strip():
             try:
                 with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -147,13 +173,24 @@ def main():
             except:
                 pass
 
-        # Cleanup control characters
+        # 5. Last Resort: Extraction of any printable strings using regex
+        if not extracted_text.strip():
+            try:
+                with open(file_path, 'rb') as f:
+                    content = f.read()
+                    # Find sequences of 4 or more printable characters
+                    strings = re.findall(rb'[ -~]{4,}', content)
+                    extracted_text = "\n".join(s.decode('ascii', errors='ignore') for s in strings)
+            except:
+                pass
+
+        # Cleanup
         extracted_text = extracted_text.replace('\x00', '')
         
         print(json.dumps({
             "full_text": extracted_text,
             "success": True,
-            "method": "optimal_universal_extractor"
+            "method": "mega_optimal_universal_extractor"
         }, ensure_ascii=False))
 
     except Exception as e:
