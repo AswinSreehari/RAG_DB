@@ -4,3 +4,7 @@ Pillow
 python-dotenv
 pymupdf
 markitdown
+easyocr
+torch
+torchvision
+opencv-python-headless

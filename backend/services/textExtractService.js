@@ -18,9 +18,46 @@ try {
 const pdfParse = pdfParseImpl;
 
 // ---------- Main Exported Function ----------
+const { exec } = require('child_process');
+const util = require('util');
+const execProm = util.promisify(exec);
+
+// ---------- Main Exported Function ----------
 async function extractText(filePath, mimeType, originalFileName) {
   const ext = path.extname(originalFileName).toLowerCase();
+  
+  console.log(`[ExtractedService] Processing ${originalFileName} (${mimeType})`);
 
+  // Use the universal Python extractor for high-quality OCR and structure
+  try {
+    const pythonPath = process.env.PYTHON_BIN || 'python';
+    const scriptPath = path.resolve(__dirname, 'universal_extractor.py');
+    
+    // Increased timeout and buffer for large/complex files
+    const { stdout, stderr } = await execProm(`"${pythonPath}" "${scriptPath}" "${filePath}"`, {
+      timeout: 300000, // 5 minutes
+      maxBuffer: 50 * 1024 * 1024 // 50MB
+    });
+
+    try {
+      const result = JSON.parse(stdout);
+      if (result.success && result.full_text) {
+        return {
+          extractedText: result.full_text,
+          tableRows: null, // MarkItDown includes tables in Markdown format
+          isTable: result.full_text.includes('|---|'), // Simple check for MD tables
+          method: 'python-universal'
+        };
+      }
+    } catch (parseError) {
+      console.warn('Failed to parse Python output, falling back to Node extractors');
+    }
+  } catch (pythonError) {
+    console.warn(`Universal extractor failed: ${pythonError.message}. Falling back to Node extractors.`);
+  }
+
+  // ---------- FALLBACK TO NODE EXTRACTORS ----------
+  
   if (ext === ".txt") return extractFromTxt(filePath);
 
   if (ext === ".pdf") return extractFromPdf(filePath);
@@ -29,13 +66,14 @@ async function extractText(filePath, mimeType, originalFileName) {
 
   if (ext === ".doc") return extractFromDoc(filePath);
 
-  // --- NEW: CSV / EXCEL SUPPORT ---
+  // --- CSV / EXCEL SUPPORT ---
   if (ext === ".csv" || ext === ".xlsx" || ext === ".xls") {
     const { rows, text } = extractTableAndText(filePath);
     return {
       extractedText: text,
       tableRows: rows,
       isTable: true,
+      method: 'node-table'
     };
   }
 
@@ -44,6 +82,7 @@ async function extractText(filePath, mimeType, originalFileName) {
     extractedText: await extractFromTxt(filePath),
     tableRows: null,
     isTable: false,
+    method: 'node-txt'
   };
 }
 

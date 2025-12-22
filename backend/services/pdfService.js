@@ -12,6 +12,9 @@ if (!fs.existsSync(pdfDir)) {
 /**
  * Clean extracted text aggressively for RAG readiness
  */
+/**
+ * Clean extracted text for RAG readiness
+ */
 function cleanExtractedText(rawText = '') {
   if (!rawText || typeof rawText !== 'string') return '';
 
@@ -26,67 +29,110 @@ function cleanExtractedText(rawText = '') {
   // Remove page numbers & standalone numbers
   text = text.replace(/^\s*(page\s*\d+|\d+)\s*$/gim, '');
 
-  // Remove headers / footers (repeated short lines)
-  const lines = text.split('\n');
-  const cleanedLines = lines.filter(line => {
-    const trimmed = line.trim();
-
-    // Remove empty or meaningless lines
-    if (!trimmed) return false;
-    if (trimmed.length < 3) return false;
-
-    // Remove OCR garbage lines
-    if (!/[a-zA-Z]/.test(trimmed)) return false;
-    if (/^[|_\-–—•·]+$/.test(trimmed)) return false;
-
-    // Remove lines with too many symbols
-    const symbolRatio =
-      (trimmed.match(/[^a-zA-Z0-9\s.,]/g) || []).length / trimmed.length;
-    if (symbolRatio > 0.4) return false;
-
-    return true;
-  });
-
-  text = cleanedLines.join('\n');
-
-  // Collapse multiple newlines
-  text = text.replace(/\n{3,}/g, '\n\n');
-
-  // Normalize spaces
-  text = text.replace(/[ \t]{2,}/g, ' ');
-
   return text.trim();
 }
 
 /**
- * Create a clean, readable PDF from extracted text
+ * Create a clean, readable PDF from extracted text, preserving structure
  */
 function createPdfFromText(text, outputPath) {
   return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 40 });
+    const doc = new PDFDocument({ 
+      margin: 40,
+      size: 'A4',
+      autoFirstPage: true 
+    });
+    
     const stream = fs.createWriteStream(outputPath);
     doc.pipe(stream);
 
-    doc.font('Times-Roman').fontSize(12);
-
+    const margin = 40;
+    const pageWidth = doc.page.width - margin * 2;
+    
     const cleanedText = cleanExtractedText(text);
 
     if (!cleanedText) {
-      doc.text('No readable textual content found.');
+      doc.font('Times-Roman').fontSize(12).text('No readable textual content found.');
       doc.end();
       stream.on('finish', () => resolve(outputPath));
       return;
     }
 
-    const paragraphs = cleanedText.split(/\n{2,}/);
+    const lines = cleanedText.split('\n');
+    
+    doc.font('Helvetica').fontSize(10); 
 
-    paragraphs.forEach(para => {
-      const normalized = para.replace(/\n+/g, ' ').trim();
-      if (normalized.length > 20) {
-        doc.text(normalized, {
-          align: 'left',
-          paragraphGap: 10,
+    lines.forEach((line) => {
+      const trimmed = line.trim();
+      
+      // Use Monospace for lines that look like tables (many spaces or pipes)
+      const isTableLike = (line.match(/[ \t]{3,}/g) || []).length > 0 || trimmed.includes('|');
+      
+      if (isTableLike) {
+        doc.font('Courier').fontSize(9);
+      } else {
+        doc.font('Helvetica').fontSize(10);
+      }
+
+      // 1. Headers (Markdown style #, ##, etc)
+      if (trimmed.startsWith('#')) {
+        const level = (trimmed.match(/^#+/) || ['#'])[0].length;
+        const headerText = trimmed.replace(/^#+\s*/, '');
+        const size = Math.max(18 - (level * 2), 12);
+        
+        doc.moveDown(0.5);
+        doc.font('Helvetica-Bold').fontSize(size).text(headerText);
+        doc.font('Helvetica').fontSize(10).moveDown(0.2);
+        return;
+      }
+
+      // 2. Table rows (Markdown style | col | col |)
+      if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+        const cells = trimmed.split('|').filter(c => c.trim().length > 0 || trimmed.includes('---'));
+        
+        // Skip separator rows like |---|---|
+        if (trimmed.includes('---') || trimmed.includes('===')) {
+          // doc.lineWidth(0.5).moveTo(doc.x, doc.y).lineTo(doc.x + pageWidth, doc.y).stroke();
+          return;
+        }
+
+        const colWidth = pageWidth / Math.max(cells.length, 1);
+        const startX = doc.x;
+        const startY = doc.y;
+        let maxHeight = 0;
+
+        cells.forEach((cell, i) => {
+          const x = startX + (i * colWidth);
+          doc.fontSize(9).text(cell.trim(), x + 2, startY + 2, {
+            width: colWidth - 4,
+            continued: false
+          });
+          maxHeight = Math.max(maxHeight, doc.y - startY);
         });
+
+        doc.y = startY + maxHeight + 2;
+        return;
+      }
+
+      // 3. List items
+      if (/^[\*\-\+] \s*/.test(trimmed) || /^\d+\.\s*/.test(trimmed)) {
+          doc.text(line, { indent: 15 });
+          return;
+      }
+
+      // 4. Regular line
+      if (trimmed === '') {
+        doc.moveDown(0.5);
+      } else {
+        doc.text(line, {
+          align: 'justify',
+          width: pageWidth
+        });
+      }
+
+      // Handle page overflow manually if needed, though pdfkit handles most line wrapping
+      if (doc.y > doc.page.height - margin * 2) {
+        doc.addPage();
       }
     });
 

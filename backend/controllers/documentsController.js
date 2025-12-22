@@ -209,44 +209,14 @@ exports.uploadDocuments = async (req, res) => {
       return res.status(400).json({ message: "No files uploaded" });
     }
 
-    const processed = [];
-    const PPT_EXTS = ['.ppt', '.pptx', '.odp'];
-    const IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.bmp', '.gif'];
-
-    for (const file of files) {
+    const processed = await Promise.all(files.map(async (file) => {
       try {
         const ext = path.extname(file.originalname || '').toLowerCase();
         let meta = null;
+        const PPT_EXTS = ['.ppt', '.pptx', '.odp'];
 
         if (PPT_EXTS.includes(ext)) {
           meta = await convertPptFile(file);
-
-        } else if (IMAGE_EXTS.includes(ext)) {
-          const ocrResult = await localOcrService.extractTextFromImage(file.path);
-          const extractedText = ocrResult.extractedText || '';
-
-          const preview =
-            extractedText.length > 500 ? extractedText.slice(0, 500) + '...' : extractedText;
-
-          const baseName = path.basename(file.filename, path.extname(file.filename));
-          const pdfFileName = `${baseName}.pdf`;
-          const pdfPath = path.join(pdfDir, pdfFileName);
-
-          await createPdfFromText(extractedText, pdfPath);
-
-          meta = {
-            originalFileName: file.originalname,
-            storedFileName: file.filename,
-            mimeType: file.mimetype,
-            size: file.size,
-            path: file.path,
-            pdfPath,
-            extractedText,
-            preview,
-            isTable: false,
-            tableRows: null,
-          };
-
         } else {
           const extraction = await textExtractService.extractText(
             file.path,
@@ -258,8 +228,7 @@ exports.uploadDocuments = async (req, res) => {
           const tableRows = extraction.tableRows || null;
           const isTable = extraction.isTable || false;
 
-          const preview =
-            extractedText.length > 500
+          const preview = extractedText.length > 500
               ? extractedText.slice(0, 500) + '...'
               : extractedText;
 
@@ -284,6 +253,7 @@ exports.uploadDocuments = async (req, res) => {
             preview,
             isTable,
             tableRows,
+            method: extraction.method
           };
         }
 
@@ -295,7 +265,7 @@ exports.uploadDocuments = async (req, res) => {
         docRecord.pdfUrl = `/documents/${docRecord.id}/pdf`;
         documents.push(docRecord);
 
-        processed.push({
+        return {
           success: true,
           message: "File processed successfully",
           document: {
@@ -308,18 +278,17 @@ exports.uploadDocuments = async (req, res) => {
             pdfUrl: docRecord.pdfUrl,
             isTable: docRecord.isTable,
           },
-        });
+        };
 
       } catch (fileError) {
         console.error(`Error processing file ${file.originalname}:`, fileError);
-
-        processed.push({
+        return {
           success: false,
           message: `Error processing file ${file.originalname}: ${fileError.message || 'unknown error'}`,
           originalFileName: file.originalname,
-        });
+        };
       }
-    }
+    }));
 
     return res.status(201).json({
       message: "Files processed",
@@ -449,43 +418,15 @@ exports.uploadAndConvert = async (req, res) => {
        });
 
     } else {
-      // 2. Handle PDF/Images (Standardize to PDF first if image)
-      let inputPdfPath = file.path;
+      // Use the upgraded textExtractService which uses universal_extractor.py
+      const extraction = await textExtractService.extractText(
+          file.path,
+          file.mimetype,
+          file.originalname
+      );
 
-      // If image, convert to PDF first? Or just OCR directly?
-      // The prompt specifically mentions "If a user uploads a pdf with image in it"
-      // But also "what ever the document is getting uploaded... even if it is an image".
-      // Let's stick to the PDF flow. If it IS an image, we should probably wrap it in PDF
-      // or just trust the new Python script to handle it if we extended it.
-      // For simplicity/robustness match:
-      // If image -> convert to temp PDF -> process.
-      // If PDF -> process directly.
-      
-      // CALL PYTHON SERVICE
-      const pythonPath = process.env.PYTHON_BIN || 'python'; // or 'python3'
-      const scriptPath = path.resolve('./services/pdf_processor.py');
-      
-      // We'll use execProm to call the script and capture stdout
-      // Note: for very large outputs, spawn is better, but execProm is easier for JSON capture if under buffer limit.
-      // We increased buffer in previous code, let's do safe here.
-      
-      const { stdout, stderr } = await execProm(`"${pythonPath}" "${scriptPath}" "${inputPdfPath}"`, {
-          timeout: 300000, // 5 min timeout for big PDFs
-          maxBuffer: 50 * 1024 * 1024 // 50MB buffer
-      });
-
-      try {
-          structuredData = JSON.parse(stdout);
-      } catch (e) {
-          console.error("Failed to parse Python output:", stdout.slice(0, 200) + "...");
-          throw new Error("OCR Service returned invalid JSON");
-      }
-
-      if (structuredData.error) {
-          throw new Error(structuredData.error);
-      }
-
-      extractedText = structuredData.full_text || "";
+      extractedText = extraction.extractedText || "";
+      structuredData = extraction;
       
       // Generate final canonical PDF with the EXTRACTED TEXT (to make it searchable/copyable)
       // This fulfills "show the extracted data in the pdf"
