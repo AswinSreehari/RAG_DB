@@ -25,9 +25,10 @@ function cleanExtractedText(rawText = '') {
 
   // Remove hyphenated line breaks (OCR issue)
   text = text.replace(/(\w+)-\n(\w+)/g, '$1$2');
-
-  // Remove page numbers markers specifically
-  text = text.replace(/^\s*page\s*\d+\s*$/gim, '');
+  
+  // Normalize page markers for readability
+  // We don't remove them anymore, just make them standard separators
+  text = text.replace(/^\s*(page\s*\d+)\s*$/gim, '\n--- $1 ---\n');
 
   return text.trim();
 }
