@@ -2,14 +2,27 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User } from 'lucide-react';
 
 const ChatAgentView = () => {
-    const [messages, setMessages] = useState([
-        {
-            id: 1,
-            type: 'bot',
-            text: 'Hello! I\'m your AI assistant. How can I help you today?',
-            timestamp: new Date()
+    const [messages, setMessages] = useState(() => {
+        const saved = localStorage.getItem('chat_history');
+        if (saved) {
+            try {
+                const parsed = JSON.parse(saved);
+                // Convert string timestamps back to Date objects
+                return parsed.map(m => ({ ...m, timestamp: new Date(m.timestamp) }));
+            } catch (e) {
+                console.error("Failed to parse chat history", e);
+            }
         }
-    ]);
+        return [
+            {
+                id: 1,
+                type: 'bot',
+                text: 'Hello! I\'m your AI assistant. How can I help you today?',
+                timestamp: new Date()
+            }
+        ];
+    });
+
     const [inputValue, setInputValue] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const messagesEndRef = useRef(null);
@@ -20,7 +33,20 @@ const ChatAgentView = () => {
 
     useEffect(() => {
         scrollToBottom();
+        // Save to localStorage whenever messages change
+        localStorage.setItem('chat_history', JSON.stringify(messages));
     }, [messages]);
+
+    const handleClearChat = () => {
+        const initialMessage = [{
+            id: 1,
+            type: 'bot',
+            text: 'Hello! I\'m your AI assistant. How can I help you today?',
+            timestamp: new Date()
+        }];
+        setMessages(initialMessage);
+        localStorage.removeItem('chat_history');
+    };
 
     const handleSendMessage = async (e) => {
         e.preventDefault();
@@ -76,14 +102,22 @@ const ChatAgentView = () => {
         <div className="flex flex-col h-full bg-[#eef6f6] rounded-2xl shadow-sm overflow-hidden">
             {/* Header */}
             <div className="bg-gradient-to-r from-teal-500 to-teal-600 px-6 py-4 shrink-0">
-                <div className="flex items-center gap-3">
-                    <div className="bg-white/20 p-2 rounded-lg">
-                        <Bot size={24} className="text-white" />
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <div className="bg-white/20 p-2 rounded-lg">
+                            <Bot size={24} className="text-white" />
+                        </div>
+                        <div>
+                            <h2 className="text-xl font-bold text-white">Chat Agent</h2>
+                            <p className="text-teal-50 text-sm">Knowledge Base Assistant</p>
+                        </div>
                     </div>
-                    <div>
-                        <h2 className="text-xl font-bold text-white">Chat Agent</h2>
-                        <p className="text-teal-50 text-sm">AI-powered assistant</p>
-                    </div>
+                    <button
+                        onClick={handleClearChat}
+                        className="text-xs bg-white/10 hover:bg-white/20 text-white px-3 py-1.5 rounded-lg border border-white/20 transition-colors"
+                    >
+                        Clear History
+                    </button>
                 </div>
             </div>
 
@@ -107,7 +141,7 @@ const ChatAgentView = () => {
                                     : 'bg-white text-slate-800 rounded-bl-sm shadow-sm'
                                     }`}
                             >
-                                <p className="text-sm leading-relaxed">{message.text}</p>
+                                <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.text}</p>
                             </div>
                             <p className="text-xs text-slate-400 mt-1 px-2">
                                 {message.timestamp.toLocaleTimeString('en-US', {
@@ -124,6 +158,21 @@ const ChatAgentView = () => {
                         )}
                     </div>
                 ))}
+
+                {isLoading && (
+                    <div className="flex gap-3 justify-start animate-pulse">
+                        <div className="bg-teal-500 p-2 rounded-full h-10 w-10 flex items-center justify-center shrink-0">
+                            <Bot size={20} className="text-white" />
+                        </div>
+                        <div className="bg-white rounded-2xl px-4 py-3 shadow-sm rounded-bl-sm">
+                            <div className="flex gap-1 h-4 items-center">
+                                <div className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce" />
+                                <div className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce [animation-delay:0.2s]" />
+                                <div className="w-1.5 h-1.5 bg-slate-300 rounded-full animate-bounce [animation-delay:0.4s]" />
+                            </div>
+                        </div>
+                    </div>
+                )}
                 <div ref={messagesEndRef} />
             </div>
 
