@@ -8,10 +8,10 @@ easyocr
 torch
 torchvision
 opencv-python-headless
-chromadb
-sentence-transformers
+faiss-cpu
 langchain
+langchain-core
 langchain-community
-langchain-huggingface
+langchain-google-genai
 langchain-text-splitters
-accelerate
+google-generativeai

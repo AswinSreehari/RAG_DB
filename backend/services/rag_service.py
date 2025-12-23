@@ -1,156 +1,158 @@
-import logging
 import os
 import sys
 import json
 import argparse
+import logging
+import pickle
+import numpy as np
+import google.generativeai as genai
+from dotenv import load_dotenv
 
-# Suppress TensorFlow/OneDNN noise
+# Suppress warnings
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-# Initialize ChromaDB (Local Persistence)
-import chromadb
-from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
-# Configure logging
-logging.basicConfig(level=logging.ERROR)
+# Configure Gemini
+api_key = os.getenv("GOOGLE_API_KEY")
+if api_key:
+    genai.configure(api_key=api_key)
 
-# Initialize ChromaDB (Local Persistence)
-CHROMA_DB_DIR = os.path.join(os.path.dirname(__file__), '..', 'chroma_db')
-client = chromadb.PersistentClient(path=CHROMA_DB_DIR)
+# Local Storage Paths
+DB_PATH = os.path.join(os.path.dirname(__file__), "..", "vector_db.pkl")
 
-# --- MODELS ---
-# Embedding Model: Fast, good for retrieval
-EMBEDDING_MODEL_NAME = 'all-MiniLM-L6-v2'
+def simple_chunk_text(text, chunk_size=1000, overlap=200):
+    """Manual text chunking to avoid heavy library imports."""
+    chunks = []
+    if not text:
+        return chunks
+    
+    start = 0
+    while start < len(text):
+        end = start + chunk_size
+        chunk = text[start:end]
+        chunks.append(chunk)
+        start += (chunk_size - overlap)
+        if start >= len(text):
+            break
+    return chunks
 
-# Generative Model: Google's Flan-T5 Small (fast, decent for simple QA) or LaMini
-# We use LaMini-Flan-T5-248M for better instruction following on small footprint
-GEN_MODEL_NAME = 'MBZUAI/LaMini-Flan-T5-248M'
-
-_embedder = None
-_generator = None
-
-def get_embedder():
-    global _embedder
-    if _embedder is None:
-        _embedder = SentenceTransformer(EMBEDDING_MODEL_NAME)
-    return _embedder
-
-def get_generator():
-    """
-    Lazy load the Generative LLM.
-    """
-    global _generator
-    if _generator is None:
-        try:
-            tokenizer = AutoTokenizer.from_pretrained(GEN_MODEL_NAME)
-            model = AutoModelForSeq2SeqLM.from_pretrained(GEN_MODEL_NAME)
-            _generator = pipeline('text2text-generation', model=model, tokenizer=tokenizer, max_length=512)
-        except Exception as e:
-            logging.error(f"Failed to load LLM: {e}")
-    return _generator
-
-def ingest_document(text, doc_id, filename):
+def get_embeddings(texts):
+    """Get embeddings using raw SDK."""
     try:
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200,
-            separators=["\n\n", "\n", ".", " ", ""]
-        )
-        chunks = splitter.split_text(text)
+        if not api_key:
+            raise ValueError("GOOGLE_API_KEY missing")
         
-        if not chunks:
-            return {"success": False, "error": "No text chunks generated"}
+        result = genai.embed_content(
+            model="models/text-embedding-004",
+            content=texts,
+            task_type="retrieval_document"
+        )
+        return result['embedding']
+    except Exception as e:
+        logging.error(f"Embedding error: {e}")
+        return None
 
-        model = get_embedder()
-        embeddings = model.encode(chunks)
-        
-        collection = client.get_or_create_collection(name="rag_documents")
-        
-        ids = [f"{doc_id}_{i}" for i in range(len(chunks))]
-        metadatas = [{"source": filename, "doc_id": str(doc_id), "chunk_index": i} for i in range(len(chunks))]
-        
-        collection.add(
-            documents=chunks,
-            embeddings=embeddings.tolist(),
-            metadatas=metadatas,
-            ids=ids
-        )
-        return {"success": True, "chunks_count": len(chunks)}
+def ingest(text, doc_id, filename):
+    try:
+        chunks = simple_chunk_text(text)
+        if not chunks:
+            return {"success": False, "error": "No text to ingest"}
+
+        embeddings = get_embeddings(chunks)
+        if not embeddings:
+            return {"success": False, "error": "Failed to generate embeddings"}
+
+        # Load existing DB
+        db = []
+        if os.path.exists(DB_PATH):
+            with open(DB_PATH, 'rb') as f:
+                db = pickle.load(f)
+
+        # Append new chunks
+        for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
+            db.append({
+                "id": f"{doc_id}_{i}",
+                "text": chunk,
+                "embedding": emb,
+                "source": filename
+            })
+
+        # Save DB
+        with open(DB_PATH, 'wb') as f:
+            pickle.dump(db, f)
+
+        return {"success": True, "chunks": len(chunks)}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-def query_vector_db_and_generate(query, n_results=3):
+def cosine_similarity(a, b):
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+def query(user_query, n_results=4):
     try:
-        # 1. RETRIEVE
-        collection = client.get_collection(name="rag_documents")
-        model = get_embedder()
-        query_vec = model.encode([query]).tolist()
-        
-        results = collection.query(
-            query_embeddings=query_vec,
-            n_results=n_results
-        )
-        
-        flattened_docs = results['documents'][0]
-        flattened_meta = results['metadatas'][0]
-        
-        if not flattened_docs:
-             return {"success": True, "answer": "I couldn't find any relevant information in your uploaded documents.", "context": []}
+        if not os.path.exists(DB_PATH):
+            return {"success": True, "answer": "No documents uploaded yet.", "sources": []}
 
-        # 2. CONSTRUCT CONTEXT
-        context_text = "\n\n".join(flattened_docs)
-        
-        # 3. GENERATE ANSWER
-        llm = get_generator()
-        if llm:
-            # Prompt Engineering
-            prompt = f"Answer the following question based on the context below. If the answer is not in the context, say 'I don't know'.\n\nContext:\n{context_text}\n\nQuestion: {query}\n\nAnswer:"
-            
-            output = llm(prompt)
-            answer = output[0]['generated_text']
-        else:
-            answer = "LLM not available. Here is the relevant text: " + context_text[:200] + "..."
+        # 1. Embed query
+        query_emb = genai.embed_content(
+            model="models/text-embedding-004",
+            content=user_query,
+            task_type="retrieval_query"
+        )['embedding']
 
-        # Prepare response source info
-        context_list = [{"text": doc, "source": meta['source']} for doc, meta in zip(flattened_docs, flattened_meta)]
+        # 2. Load DB and compute similarity
+        with open(DB_PATH, 'rb') as f:
+            db = pickle.load(f)
+
+        scores = []
+        for item in db:
+            score = cosine_similarity(query_emb, item['embedding'])
+            scores.append((score, item))
+
+        # 3. Sort and pick top results
+        scores.sort(key=lambda x: x[0], reverse=True)
+        top_items = [x[1] for x in scores[:n_results]]
+
+        context = "\n\n".join([item['text'] for item in top_items])
+        sources = list(set([item['source'] for item in top_items]))
+
+        # 4. Generate answer
+        try:
+            model = genai.GenerativeModel('models/gemini-1.5-flash')
+            prompt = f"Answer the question based on the context.\nContext: {context}\nQuestion: {user_query}"
+            response = model.generate_content(prompt)
+            answer = response.text
+        except Exception:
+            # Fallback to general flash latest
+            model = genai.GenerativeModel('models/gemini-flash-latest')
+            prompt = f"Answer the question based on the context.\nContext: {context}\nQuestion: {user_query}"
+            response = model.generate_content(prompt)
+            answer = response.text
         
         return {
             "success": True,
             "answer": answer,
-            "context": context_list
+            "sources": sources
         }
-            
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['ingest', 'query'], help="Action to perform")
-    parser.add_argument('--text', help="Text content to ingest")
-    parser.add_argument('--doc_id', help="Document ID")
-    parser.add_argument('--filename', help="Filename")
-    parser.add_argument('--query', help="Query string")
-    
+    parser.add_argument('action')
+    parser.add_argument('--text')
+    parser.add_argument('--doc_id')
+    parser.add_argument('--filename')
+    parser.add_argument('--query')
     args = parser.parse_args()
-    
-    if args.action == 'ingest':
-        if not args.text:
-            print(json.dumps({"success": False, "error": "Missing info"}))
-            sys.exit(1)
-            
-        text_content = args.text
-        if os.path.exists(text_content) and os.path.isfile(text_content):
-             with open(text_content, 'r', encoding='utf-8', errors='ignore') as f:
-                 text_content = f.read()
 
-        print(json.dumps(ingest_document(text_content, args.doc_id, args.filename)))
-        
+    if args.action == 'ingest':
+        txt = args.text
+        if os.path.exists(txt):
+            with open(txt, 'r', encoding='utf-8', errors='ignore') as f:
+                txt = f.read()
+        print(json.dumps(ingest(txt, args.doc_id, args.filename)))
     elif args.action == 'query':
-        if not args.query:
-            print(json.dumps({"success": False, "error": "Missing query"}))
-            sys.exit(1)
-        print(json.dumps(query_vector_db_and_generate(args.query)))
+        print(json.dumps(query(args.query)))
