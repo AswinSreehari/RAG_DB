@@ -11,6 +11,7 @@ const ChatAgentView = () => {
         }
     ]);
     const [inputValue, setInputValue] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
     const messagesEndRef = useRef(null);
 
     const scrollToBottom = () => {
@@ -21,32 +22,54 @@ const ChatAgentView = () => {
         scrollToBottom();
     }, [messages]);
 
-    const handleSendMessage = (e) => {
+    const handleSendMessage = async (e) => {
         e.preventDefault();
 
         if (!inputValue.trim()) return;
+
+        const textInput = inputValue;
 
         // Add user message
         const userMessage = {
             id: Date.now(),
             type: 'user',
-            text: inputValue,
+            text: textInput,
             timestamp: new Date()
         };
 
         setMessages(prev => [...prev, userMessage]);
         setInputValue('');
+        setIsLoading(true);
 
-        // Auto-reply after 500ms
-        setTimeout(() => {
+        try {
+            const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+            const response = await fetch(`${BACKEND_URL}/documents/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query: textInput })
+            });
+
+            const data = await response.json();
+
             const botReply = {
                 id: Date.now() + 1,
                 type: 'bot',
-                text: 'This feature is currently under development. Stay tuned for updates!',
+                text: data.answer || 'I could not find an answer in your documents.',
                 timestamp: new Date()
             };
             setMessages(prev => [...prev, botReply]);
-        }, 500);
+
+        } catch (error) {
+            console.error("Chat Error:", error);
+            setMessages(prev => [...prev, {
+                id: Date.now() + 1,
+                type: 'bot',
+                text: "Sorry, I'm having trouble connecting to the Knowledge Base.",
+                timestamp: new Date()
+            }]);
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     return (

@@ -29,4 +29,7 @@ router.get('/:id/json', documentsController.downloadDocumentJson);
 
 
 
+// POST /documents/chat
+router.post('/chat', documentsController.chatWithAgent);
+
 module.exports = router;

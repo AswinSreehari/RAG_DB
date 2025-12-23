@@ -7,31 +7,40 @@ import io
 import re
 import zipfile
 import concurrent.futures
-from markitdown import MarkItDown
 from PIL import Image, ImageOps, ImageEnhance
-import fitz  # PyMuPDF
 
-# Configure logging
-logging.basicConfig(level=logging.ERROR)
+# Configure logging to stderr
+logging.basicConfig(level=logging.ERROR, stream=sys.stderr)
 
+# Global lazy loaders for heavy libraries
 _easyocr_reader = None
+_markitdown_client = None
 
 def get_easyocr_reader():
     global _easyocr_reader
     if _easyocr_reader is None:
         try:
             import easyocr
-            # We initialize with 'en' - this takes a moment
+            # Note: GPU=False for widest compatibility on CPUs
             _easyocr_reader = easyocr.Reader(['en'], gpu=False)
         except Exception as e:
-            logging.error(f"Failed to load EasyOCR: {e}")
+            logging.error(f"EasyOCR load failed: {e}")
     return _easyocr_reader
 
+def get_markitdown():
+    global _markitdown_client
+    if _markitdown_client is None:
+        try:
+            from markitdown import MarkItDown
+            _markitdown_client = MarkItDown()
+        except Exception as e:
+            logging.error(f"MarkItDown load failed: {e}")
+    return _markitdown_client
+
 def enhance_image(img):
-    """
-    Enhance image for OCR: grayscale, contrast, and sharpening.
-    """
     try:
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
         img = ImageOps.grayscale(img)
         img = ImageEnhance.Contrast(img).enhance(2.0)
         img = ImageEnhance.Sharpness(img).enhance(2.0)
@@ -40,9 +49,6 @@ def enhance_image(img):
         return img
 
 def perform_ocr_on_image(image_input):
-    """
-    Highly aggressive OCR: tries EasyOCR, then Tesseract if needed.
-    """
     text = ""
     reader = get_easyocr_reader()
     
@@ -52,199 +58,195 @@ def perform_ocr_on_image(image_input):
         else:
             img = Image.open(image_input)
         
-        # Pre-process
         img = enhance_image(img)
         
-        # Try EasyOCR first
         if reader:
             img_byte_arr = io.BytesIO()
             img.save(img_byte_arr, format='PNG')
-            # paragraph=True groups text into logical blocks
-            text = "\n\n".join(reader.readtext(img_byte_arr.getvalue(), detail=0, paragraph=True))
+            # detail=0 returns just text, paragraph=True groups into blocks
+            results = reader.readtext(img_byte_arr.getvalue(), detail=0, paragraph=True)
+            text = "\n\n".join(results)
 
-        # Fallback to Tesseract if EasyOCR missed it
-        if len(text.strip()) < 10:
-            import pytesseract
-            # Try different PSM modes for dense text
-            text = pytesseract.image_to_string(img, config=r'--oem 3 --psm 6')
-            if len(text.strip()) < 10:
-                text = pytesseract.image_to_string(img, config=r'--oem 3 --psm 3')
+        # Fallback to Tesseract if EasyOCR is empty or failed
+        if len(text.strip()) < 5:
+            try:
+                import pytesseract
+                text = pytesseract.image_to_string(img, config=r'--oem 3 --psm 6')
+            except:
+                pass
                 
     except Exception as e:
         logging.error(f"OCR failed: {e}")
         
     return text
 
-def process_pdf_page(args):
+def process_pdf_hybrid(pdf_path):
     """
-    Processes a PDF page with fallback to OCR if native text is sparse.
+    State-of-the-art PDF extraction:
+    Sync text layer extraction + Parallelized OCR for images/scans.
     """
-    page_index, pdf_path = args
-    text = ""
-    try:
-        doc = fitz.open(pdf_path)
-        page = doc[page_index]
-        
-        # 1. Native text extraction
-        text = page.get_text("text").strip()
-        
-        # 2. Hybrid Check:
-        # If text is suspiciously low or contains images, perform OCR on the WHOLE page rendered as image.
-        # This catches "image inside pdf" perfectly.
-        # We also check for 'embedded images' specifically to capture them if they are small.
-        
-        has_images = len(page.get_images()) > 0
-        is_sparse = len(text) < 200
-        
-        if is_sparse or has_images:
-            # Render page to high-res image
-            pix = page.get_pixmap(matrix=fitz.Matrix(300/72, 300/72))
-            img_data = pix.tobytes("png")
-            img = Image.open(io.BytesIO(img_data))
-            
-            ocr_text = perform_ocr_on_image(img)
-            
-            # Smart Merge:
-            # If OCR found significantly more text, prefer it.
-            # OR if we have both, append OCR text (it might capture text inside figures that native missed)
-            if len(ocr_text.strip()) > len(text):
-                text = ocr_text
-            elif len(ocr_text.strip()) > 20 and ocr_text.strip() not in text:
-                 # Append OCR content as a "Figure Extraction"
-                text = text + "\n\n--- [Extracted from Image/Figure] ---\n" + ocr_text
-                
-        doc.close()
-    except Exception as e:
-        logging.error(f"Page {page_index} error: {e}")
-        
-    return page_index, text
-
-def process_pdf_optimized(pdf_path):
-    """
-    Parallel PDF page processing.
-    """
+    import fitz  # PyMuPDF
+    results = []
+    
     try:
         doc = fitz.open(pdf_path)
         num_pages = len(doc)
+        
+        # Prepare page tasks
+        page_tasks = []
+        for i in range(num_pages):
+            page = doc[i]
+            native_text = page.get_text("text").strip()
+            images = page.get_images()
+            
+            # If page is empty (scanned) or contains images, we add it to OCR queue
+            if len(native_text) < 100 or len(images) > 0:
+                # Render to pixmap for OCR
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2)) # 144 DPI (balance speed/acuity)
+                img_bytes = pix.tobytes("png")
+                page_tasks.append({
+                    "index": i,
+                    "img_bytes": img_bytes,
+                    "native_text": native_text
+                })
+            else:
+                results.append((i, native_text))
+
+        # Perform OCR in parallel using a ThreadPool
+        def ocr_worker(task):
+            img = Image.open(io.BytesIO(task["img_bytes"]))
+            ocr_text = perform_ocr_on_image(img)
+            
+            # Intelligent merge
+            native = task["native_text"]
+            if len(ocr_text.strip()) > len(native) * 1.5:
+                return task["index"], ocr_text
+            elif len(ocr_text.strip()) > 10:
+                # Avoid exact duplicates
+                if ocr_text.strip()[:50] not in native:
+                    return task["index"], native + "\n\n[OCR Data]:\n" + ocr_text
+            return task["index"], native
+
+        if page_tasks:
+            # Note: We limit workers to avoid CPU thrashing on some environments
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                ocr_results = list(executor.map(ocr_worker, page_tasks))
+                results.extend(ocr_results)
+        
         doc.close()
         
-        full_text_parts = [None] * num_pages
-        # Use more workers for faster PDF processing
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(num_pages, 8)) as executor:
-            task_args = [(i, pdf_path) for i in range(num_pages)]
-            results = list(executor.map(process_pdf_page, task_args))
-            
-            for page_index, text in results:
-                full_text_parts[page_index] = f"--- Page {page_index + 1} ---\n{text}"
-                
-        return "\n\n".join(full_text_parts)
+        # Sort by page index and join
+        results.sort(key=lambda x: x[0])
+        return "\n\n".join([f"--- Page {i+1} ---\n{t}" for i, t in results if t.strip()])
+        
     except Exception as e:
-        logging.error(f"PDF optimized processing failed: {e}")
+        logging.error(f"PDF deep scan failed: {e}")
+        # Final fallback for PDF: MarkItDown
+        try:
+            md = get_markitdown()
+            if md:
+                return md.convert(pdf_path).text_content
+        except:
+            pass
         return ""
 
-def extract_images_from_office_file(file_path):
+def extract_media_from_office(file_path):
     """
-    Extracts images from DOCX/PPTX (which are zip files) and OCRs them.
+    Extract images from DOCX/PPTX and OCR them.
+    This solves the 'images inside office files' problem.
     """
-    extracted_text = []
+    texts = []
     try:
         with zipfile.ZipFile(file_path, 'r') as z:
-            # Find all media files
-            media_files = [f for f in z.namelist() if f.startswith('word/media/') or f.startswith('ppt/media/')]
-            
-            for media in media_files:
-                if media.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.webp')):
+            # word/media for docx, ppt/media for pptx
+            media_list = [f for f in z.namelist() if 'media/' in f]
+            for media in media_list:
+                if media.lower().endswith(('.png', '.jpg', '.jpeg')):
                     try:
-                        img_data = z.read(media)
-                        img = Image.open(io.BytesIO(img_data))
-                        
-                        # Only OCR reasonable sized images (skip icons/lines)
-                        if img.width > 50 and img.height > 50:
-                            text = perform_ocr_on_image(img)
-                            if len(text.strip()) > 10:
-                                extracted_text.append(f"\n--- [Text from Embedded Image: {os.path.basename(media)}] ---\n{text}")
+                        with z.open(media) as f:
+                            img = Image.open(f)
+                            if img.width > 120 and img.height > 120:
+                                ocr = perform_ocr_on_image(img)
+                                if len(ocr.strip()) > 20:
+                                    texts.append(f"\n[Extracted from {os.path.basename(media)}]:\n{ocr}")
                     except:
                         continue
-    except Exception as e:
-        logging.error(f"Office image extraction failed: {e}")
-    
-    return "\n".join(extracted_text)
+    except:
+        pass
+    return "\n".join(texts)
 
 def main():
-    parser = argparse.ArgumentParser(description="Hybrid Universal Document Extractor")
-    parser.add_argument("file_path", help="Path to the document")
+    parser = argparse.ArgumentParser(description="Professional RAG Document Extractor")
+    parser.add_argument("file_path", help="Target document path")
     args = parser.parse_args()
 
     if not os.path.exists(args.file_path):
-        print(json.dumps({"error": "File not found"}))
+        print(json.dumps({"error": "File not found", "success": False}))
         sys.exit(1)
 
     file_path = args.file_path
     ext = os.path.splitext(file_path)[1].lower()
+    extracted_text = ""
     
     try:
-        extracted_text = ""
-        office_ocr_text = ""
+        # A. PDF Logic
+        if ext == '.pdf':
+            extracted_text = process_pdf_hybrid(file_path)
         
-        # 1. Handle Native Office Formats (DOCX, PPTX, XLSX)
-        if ext in ['.xlsx', '.xls', '.csv', '.pptx', '.ppt', '.docx', '.doc']:
-            # A. Extract Text via MarkItDown
-            md = MarkItDown()
-            try:
-                result = md.convert(file_path)
-                extracted_text = result.text_content
-            except Exception as e:
-                logging.warning(f"MarkItDown failed: {e}")
-
-            # B. Extract Embedded Images (Crucial for 'image inside docx')
-            if ext in ['.docx', '.doc', '.pptx', '.ppt']:
-                office_ocr_text = extract_images_from_office_file(file_path)
-                
-            # Combine
-            extracted_text = extracted_text + "\n" + office_ocr_text
-
-        # 2. Handle PDF (Hybrid Mode)
-        elif ext == '.pdf':
-            extracted_text = process_pdf_optimized(file_path)
+        # B. Office/Table Logic
+        elif ext in ['.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls', '.csv']:
+            md = get_markitdown()
+            if md:
+                try:
+                    extracted_text = md.convert(file_path).text_content
+                except:
+                    pass
             
-        # 3. Handle Images
+            # DOCX/PPTX Image Capture
+            if ext in ['.docx', '.pptx']:
+                media_text = extract_media_from_office(file_path)
+                if media_text:
+                    extracted_text += "\n" + media_text
+        
+        # C. Straight Image Logic
         elif ext in ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.webp']:
             extracted_text = perform_ocr_on_image(file_path)
 
-        # 4. Final Fallback for "No readable textual content"
-        if not extracted_text.strip():
-             # Try OCR-ing the file as an image if it's not one of the complex types
-             if ext not in ['.pdf', '.xlsx', '.pptx', '.docx']:
-                 extracted_text = perform_ocr_on_image(file_path)
-
-        # 5. Last Resort String Extraction
+        # D. Generic Text Fallback
         if not extracted_text.strip():
             try:
                 with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                     extracted_text = f.read()
             except:
                 pass
-            
-            # If still absolutely nothing, try binary string extraction (extreme fallback)
-            if not extracted_text.strip():
-                 try:
-                    with open(file_path, 'rb') as f:
-                        content = f.read()
-                        strings = re.findall(rb'[ -~]{4,}', content)
-                        extracted_text = "\n".join(s.decode('ascii', errors='ignore') for s in strings)
-                 except:
-                    pass
+        
+        # E. Final Binary String Scraping (The 'Never Fail' Path)
+        if not extracted_text.strip():
+            try:
+                with open(file_path, 'rb') as f:
+                    raw = f.read()
+                    strings = re.findall(rb'[ -~]{6,}', raw)
+                    extracted_text = "\n".join(s.decode('ascii', errors='ignore') for s in strings if len(s) > 15)
+            except:
+                pass
 
-        # Valid JSON Output
+        # Cleanup control characters
+        clean_text = "".join(ch for ch in extracted_text if ch.isprintable() or ch in "\n\r\t")
+
+        # Success JSON
         print(json.dumps({
-            "full_text": extracted_text.replace('\x00', ''),
+            "full_text": clean_text.strip(),
             "success": True,
-            "method": "hybrid_universal_extractor"
+            "method": "prof_hybrid_extractor_v4"
         }, ensure_ascii=False))
 
     except Exception as e:
-        # Never crash, always return JSON
-        print(json.dumps({"error": str(e), "success": False}))
+        # Emergency JSON wrapper
+        print(json.dumps({
+            "error": str(e),
+            "full_text": f"SYSTEM_ERROR: {str(e)}",
+            "success": False
+        }))
         sys.exit(0)
 
 if __name__ == "__main__":
