@@ -15,7 +15,8 @@ app.use(
     origin: [
       'https://file-upload-brown.vercel.app',  
       'https://doc-extraction-ten.vercel.app', 
-      'https://rag-db.vercel.app', 
+      'https://rag-db.vercel.app',
+      'https://rag-db-aswins-projects-49b08197.vercel.app', 
       'http://localhost:5173',                
     ],
     methods: 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
